@@ -63,6 +63,47 @@ func TestRunPublishesRetryThenCommits(t *testing.T) {
 	}
 }
 
+func TestRunOnRetryTopicDeadLettersLastAttempt(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	records := testRecords(t)
+	env := job.Envelope{ID: "email-1", Payload: []byte("body"), Attempt: 2}
+	body, err := records.Marshal(topics.Retry, env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := &scriptReader{
+		msgs: []Message{{Topic: topics.Retry, Key: []byte(env.ID), Value: body}},
+	}
+	reader.onCommit = func() { cancel() }
+	pub := &memPublisher{}
+	script := &agent.Script{
+		Steps:    3,
+		Failures: []agent.Failure{{Attempt: 2, Step: 1, Err: errors.New("still down")}},
+	}
+
+	err = Run(ctx, reader, records, pipeline.Handler{
+		Agent:       script,
+		MaxAttempts: 2,
+		Publisher:   pub,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reader.commits) != 1 {
+		t.Fatalf("commits = %d", len(reader.commits))
+	}
+	if len(pub.got) != 1 || pub.got[0].dest != route.DestDLQ {
+		t.Fatalf("published = %+v", pub.got)
+	}
+	if pub.got[0].env.Attempt != 2 || pub.got[0].env.ID != "email-1" {
+		t.Fatalf("dead letter = %+v", pub.got[0].env)
+	}
+	calls := script.Calls()
+	if len(calls) != 1 || calls[0].Step != 1 || calls[0].Attempt != 2 {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
 func TestRunDoesNotCommitWhenPublishFails(t *testing.T) {
 	records := testRecords(t)
 	reader := &scriptReader{
