@@ -104,6 +104,36 @@ func TestRunOnRetryTopicDeadLettersLastAttempt(t *testing.T) {
 	}
 }
 
+func TestRunStopsBeforePublishWhenContextIsCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	records := testRecords(t)
+	reader := &scriptReader{
+		msgs: []Message{mustMessage(t, records, job.Envelope{ID: "email-1", Attempt: 1})},
+	}
+	pub := &memPublisher{}
+
+	err := Run(ctx, reader, records, pipeline.Handler{
+		Agent: runFunc(func(ctx context.Context, _ job.Envelope) error {
+			cancel()
+			return ctx.Err()
+		}),
+		MaxAttempts: 2,
+		Publisher:   pub,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reader.commits) != 0 || len(pub.got) != 0 {
+		t.Fatalf("commits = %d, published = %d", len(reader.commits), len(pub.got))
+	}
+}
+
+type runFunc func(context.Context, job.Envelope) error
+
+func (f runFunc) Run(ctx context.Context, env job.Envelope) error {
+	return f(ctx, env)
+}
+
 func TestRunDoesNotCommitWhenPublishFails(t *testing.T) {
 	records := testRecords(t)
 	reader := &scriptReader{

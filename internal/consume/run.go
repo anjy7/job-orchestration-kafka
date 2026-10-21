@@ -68,6 +68,9 @@ func Run(ctx context.Context, r Reader, dec Decoder, h pipeline.Handler) error {
 
 		result, err := h.Handle(ctx, env)
 		if err != nil {
+			if ctx.Err() != nil {
+				return nil
+			}
 			return err
 		}
 		if !result.Ack {

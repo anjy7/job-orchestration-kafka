@@ -50,6 +50,9 @@ func (h Handler) Handle(ctx context.Context, env job.Envelope) (Result, error) {
 	}
 
 	runErr := h.Agent.Run(ctx, env)
+	if runErr != nil && ctx.Err() != nil {
+		return Result{}, ctx.Err()
+	}
 	if runErr == nil {
 		decision, err := route.Success(env.Attempt)
 		if err != nil {

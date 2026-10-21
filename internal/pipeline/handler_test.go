@@ -138,6 +138,24 @@ func TestPublishErrorDoesNotAck(t *testing.T) {
 	}
 }
 
+func TestCanceledAgentDoesNotPublish(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	script := &agent.Script{Steps: 1}
+	pub := &memPublisher{}
+
+	got, err := (Handler{Agent: script, MaxAttempts: 2, Publisher: pub}).Handle(ctx, job.Envelope{ID: "email-1", Attempt: 1})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %v", err)
+	}
+	if got.Ack || got.Published != nil || len(pub.got) != 0 {
+		t.Fatalf("result = %+v, published = %+v", got, pub.got)
+	}
+	if len(script.Calls()) != 0 {
+		t.Fatalf("calls = %+v", script.Calls())
+	}
+}
+
 func TestHandleRejectsBadInput(t *testing.T) {
 	_, err := (Handler{}).Handle(context.Background(), job.Envelope{ID: "email-1", Attempt: 1})
 	if !errors.Is(err, ErrNoAgent) {
